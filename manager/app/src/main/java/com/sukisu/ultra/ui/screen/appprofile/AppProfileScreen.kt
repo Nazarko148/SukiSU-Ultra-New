@@ -31,6 +31,42 @@ import com.sukisu.ultra.ui.util.setSepolicy
 import com.sukisu.ultra.ui.viewmodel.SuperUserViewModel
 import com.sukisu.ultra.ui.viewmodel.getTemplateInfoById
 
+private data class PendingGrantRequest(
+    val name: String,
+    val currentUid: Int,
+    val rootUseDefault: Boolean,
+    val rootTemplate: String?,
+    val uid: Int,
+    val gid: Int,
+    val groups: List<Int>,
+    val capabilities: List<Int>,
+    val context: String,
+    val namespace: Int,
+    val nonRootUseDefault: Boolean,
+    val umountModules: Boolean,
+    val rules: String,
+) {
+    companion object {
+        fun fromProfile(profile: Natives.Profile): PendingGrantRequest {
+            return PendingGrantRequest(
+                name = profile.name,
+                currentUid = profile.currentUid,
+                rootUseDefault = profile.rootUseDefault,
+                rootTemplate = profile.rootTemplate,
+                uid = profile.uid,
+                gid = profile.gid,
+                groups = profile.groups,
+                capabilities = profile.capabilities,
+                context = profile.context,
+                namespace = profile.namespace,
+                nonRootUseDefault = profile.nonRootUseDefault,
+                umountModules = profile.umountModules,
+                rules = profile.rules
+            )
+        }
+    }
+}
+
 @Composable
 fun AppProfileScreen(uid: Int) {
     val uiMode = LocalUiMode.current
@@ -75,29 +111,11 @@ fun AppProfileScreen(uid: Int) {
     val failToUpdateSepolicy = stringResource(R.string.failed_to_update_sepolicy).format(primaryAppInfo.label)
     val suNotAllowed = stringResource(R.string.su_not_allowed).format(primaryAppInfo.label)
     val confirmGrantRootAgain = stringResource(R.string.confirm_grant_root_again).format(primaryAppInfo.label)
-    var pendingGrantKey by rememberSaveable(uid, packageName) {
-        mutableStateOf<String?>(null)
+    var pendingGrantRequest by remember(uid, packageName) {
+        mutableStateOf<PendingGrantRequest?>(null)
     }
-    var pendingGrantExpiry by rememberSaveable(uid, packageName) {
+    var pendingGrantExpiry by remember(uid, packageName) {
         mutableStateOf(0L)
-    }
-
-    fun grantConfirmationKey(profile: Natives.Profile): String {
-        return listOf(
-            profile.name,
-            profile.currentUid.toString(),
-            profile.rootUseDefault.toString(),
-            profile.rootTemplate.orEmpty(),
-            profile.uid.toString(),
-            profile.gid.toString(),
-            profile.groups.joinToString(","),
-            profile.capabilities.joinToString(","),
-            profile.context,
-            profile.namespace.toString(),
-            profile.nonRootUseDefault.toString(),
-            profile.umountModules.toString(),
-            profile.rules
-        ).joinToString("|")
     }
 
     fun showMessage(message: String) {
@@ -134,52 +152,52 @@ fun AppProfileScreen(uid: Int) {
         onProfileChange = { updatedProfile ->
             scope.launch {
                 val now = SystemClock.elapsedRealtime()
-                val requestKey = grantConfirmationKey(updatedProfile)
-                val pendingExpired = pendingGrantKey != null && now > pendingGrantExpiry
-                val pendingMismatch = pendingGrantKey != null &&
-                        (!updatedProfile.allowSu || pendingGrantKey != requestKey)
+                val request = PendingGrantRequest.fromProfile(updatedProfile)
+                val pendingExpired = pendingGrantRequest != null && now > pendingGrantExpiry
+                val pendingMismatch = pendingGrantRequest != null &&
+                        (!updatedProfile.allowSu || pendingGrantRequest != request)
                 if (pendingExpired || pendingMismatch) {
-                    pendingGrantKey = null
+                    pendingGrantRequest = null
                     pendingGrantExpiry = 0L
                 }
                 val pendingConfirmed = updatedProfile.allowSu
-                        && pendingGrantKey == requestKey
+                        && pendingGrantRequest == request
                         && now <= pendingGrantExpiry
 
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
-                        pendingGrantKey = null
+                        pendingGrantRequest = null
                         pendingGrantExpiry = 0L
                         showMessage(suNotAllowed)
                         return@launch
                     }
                     if (!pendingConfirmed && !profile.allowSu) {
-                        pendingGrantKey = requestKey
+                        pendingGrantRequest = request
                         pendingGrantExpiry = now + 15_000L
                         showMessage(confirmGrantRootAgain)
                         return@launch
                     }
-                    pendingGrantKey = null
+                    pendingGrantRequest = null
                     pendingGrantExpiry = 0L
                     if (!updatedProfile.rootUseDefault
                         && updatedProfile.rules.isNotEmpty()
                         && !setSepolicy(profile.name, updatedProfile.rules)
                     ) {
-                        pendingGrantKey = null
+                        pendingGrantRequest = null
                         pendingGrantExpiry = 0L
                         showMessage(failToUpdateSepolicy)
                         return@launch
                     }
                 } else {
-                    pendingGrantKey = null
+                    pendingGrantRequest = null
                     pendingGrantExpiry = 0L
                 }
                 if (!Natives.setAppProfile(updatedProfile)) {
-                    pendingGrantKey = null
+                    pendingGrantRequest = null
                     pendingGrantExpiry = 0L
                     showMessage(failToUpdateAppProfile)
                 } else {
-                    pendingGrantKey = null
+                    pendingGrantRequest = null
                     pendingGrantExpiry = 0L
                     profile = updatedProfile
                     if (uiMode == UiMode.Material) {
