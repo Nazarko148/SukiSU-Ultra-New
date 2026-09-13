@@ -142,6 +142,9 @@ fun AppProfileScreen(uid: Int) {
                     pendingGrantKey = null
                     pendingGrantExpiry = 0L
                 }
+                val pendingConfirmed = updatedProfile.allowSu
+                        && pendingGrantKey == requestKey
+                        && now <= pendingGrantExpiry
 
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
@@ -150,15 +153,14 @@ fun AppProfileScreen(uid: Int) {
                         showMessage(suNotAllowed)
                         return@launch
                     }
-                    if (!profile.allowSu) {
-                        val isConfirmed = now <= pendingGrantExpiry && pendingGrantKey == requestKey
-                        if (!isConfirmed) {
-                            pendingGrantKey = requestKey
-                            pendingGrantExpiry = now + 15_000L
-                            showMessage(confirmGrantRootAgain)
-                            return@launch
-                        }
+                    if (!pendingConfirmed && !profile.allowSu) {
+                        pendingGrantKey = requestKey
+                        pendingGrantExpiry = now + 15_000L
+                        showMessage(confirmGrantRootAgain)
+                        return@launch
                     }
+                    pendingGrantKey = null
+                    pendingGrantExpiry = 0L
                     if (!updatedProfile.rootUseDefault
                         && updatedProfile.rules.isNotEmpty()
                         && !setSepolicy(profile.name, updatedProfile.rules)
