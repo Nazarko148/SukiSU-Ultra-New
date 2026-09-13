@@ -133,6 +133,16 @@ fun AppProfileScreen(uid: Int) {
         },
         onProfileChange = { updatedProfile ->
             scope.launch {
+                val now = SystemClock.elapsedRealtime()
+                val requestKey = grantConfirmationKey(updatedProfile)
+                val pendingExpired = pendingGrantKey != null && now > pendingGrantExpiry
+                val pendingMismatch = pendingGrantKey != null &&
+                        (!updatedProfile.allowSu || pendingGrantKey != requestKey)
+                if (pendingExpired || pendingMismatch) {
+                    pendingGrantKey = null
+                    pendingGrantExpiry = 0L
+                }
+
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
                         pendingGrantKey = null
@@ -141,8 +151,6 @@ fun AppProfileScreen(uid: Int) {
                         return@launch
                     }
                     if (!profile.allowSu) {
-                        val now = SystemClock.elapsedRealtime()
-                        val requestKey = grantConfirmationKey(updatedProfile)
                         val isConfirmed = now <= pendingGrantExpiry && pendingGrantKey == requestKey
                         if (!isConfirmed) {
                             pendingGrantKey = requestKey
