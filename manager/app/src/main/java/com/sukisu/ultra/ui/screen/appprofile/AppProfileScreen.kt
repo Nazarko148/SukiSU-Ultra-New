@@ -179,15 +179,6 @@ fun AppProfileScreen(uid: Int) {
                     }
                     pendingGrantRequest = null
                     pendingGrantExpiry = 0L
-                    if (!updatedProfile.rootUseDefault
-                        && updatedProfile.rules.isNotEmpty()
-                        && !setSepolicy(profile.name, updatedProfile.rules)
-                    ) {
-                        pendingGrantRequest = null
-                        pendingGrantExpiry = 0L
-                        showMessage(failToUpdateSepolicy)
-                        return@launch
-                    }
                 } else {
                     pendingGrantRequest = null
                     pendingGrantExpiry = 0L
@@ -199,6 +190,18 @@ fun AppProfileScreen(uid: Int) {
                 } else {
                     pendingGrantRequest = null
                     pendingGrantExpiry = 0L
+                    if (updatedProfile.allowSu
+                        && !updatedProfile.rootUseDefault
+                        && updatedProfile.rules.isNotEmpty()
+                        && !setSepolicy(updatedProfile.name, updatedProfile.rules)
+                    ) {
+                        Natives.setAppProfile(profile)
+                        if (profile.allowSu && !profile.rootUseDefault) {
+                            setSepolicy(profile.name, profile.rules)
+                        }
+                        showMessage(failToUpdateSepolicy)
+                        return@launch
+                    }
                     profile = updatedProfile
                     if (uiMode == UiMode.Material) {
                         viewModel.loadAppList()
