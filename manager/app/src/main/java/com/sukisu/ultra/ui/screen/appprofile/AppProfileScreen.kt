@@ -1,5 +1,6 @@
 package com.sukisu.ultra.ui.screen.appprofile
 
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +30,42 @@ import com.sukisu.ultra.ui.util.restartApp
 import com.sukisu.ultra.ui.util.setSepolicy
 import com.sukisu.ultra.ui.viewmodel.SuperUserViewModel
 import com.sukisu.ultra.ui.viewmodel.getTemplateInfoById
+
+private data class PendingGrantRequest(
+    val name: String,
+    val currentUid: Int,
+    val rootUseDefault: Boolean,
+    val rootTemplate: String?,
+    val uid: Int,
+    val gid: Int,
+    val groups: List<Int>,
+    val capabilities: List<Int>,
+    val context: String,
+    val namespace: Int,
+    val nonRootUseDefault: Boolean,
+    val umountModules: Boolean,
+    val rules: String,
+) {
+    companion object {
+        fun fromProfile(profile: Natives.Profile): PendingGrantRequest {
+            return PendingGrantRequest(
+                name = profile.name,
+                currentUid = profile.currentUid,
+                rootUseDefault = profile.rootUseDefault,
+                rootTemplate = profile.rootTemplate,
+                uid = profile.uid,
+                gid = profile.gid,
+                groups = profile.groups,
+                capabilities = profile.capabilities,
+                context = profile.context,
+                namespace = profile.namespace,
+                nonRootUseDefault = profile.nonRootUseDefault,
+                umountModules = profile.umountModules,
+                rules = profile.rules
+            )
+        }
+    }
+}
 
 @Composable
 fun AppProfileScreen(uid: Int) {
@@ -73,6 +110,13 @@ fun AppProfileScreen(uid: Int) {
     val failToUpdateAppProfile = stringResource(R.string.failed_to_update_app_profile).format(primaryAppInfo.label)
     val failToUpdateSepolicy = stringResource(R.string.failed_to_update_sepolicy).format(primaryAppInfo.label)
     val suNotAllowed = stringResource(R.string.su_not_allowed).format(primaryAppInfo.label)
+    val confirmGrantRootAgain = stringResource(R.string.confirm_grant_root_again).format(primaryAppInfo.label)
+    var pendingGrantRequest by remember(uid, packageName) {
+        mutableStateOf<PendingGrantRequest?>(null)
+    }
+    var pendingGrantExpiry by remember(uid, packageName) {
+        mutableStateOf(0L)
+    }
 
     fun showMessage(message: String) {
         scope.launch {
@@ -107,22 +151,63 @@ fun AppProfileScreen(uid: Int) {
         },
         onProfileChange = { updatedProfile ->
             scope.launch {
+                val now = SystemClock.elapsedRealtime()
+                val request = PendingGrantRequest.fromProfile(updatedProfile)
+                val pendingExpired = pendingGrantRequest != null && now > pendingGrantExpiry
+                val pendingMismatch = pendingGrantRequest != null &&
+                        (!updatedProfile.allowSu || pendingGrantRequest != request)
+                if (pendingExpired || pendingMismatch) {
+                    pendingGrantRequest = null
+                    pendingGrantExpiry = 0L
+                }
+                val pendingConfirmed = updatedProfile.allowSu
+                        && pendingGrantRequest == request
+                        && now <= pendingGrantExpiry
+
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
+                        pendingGrantRequest = null
+                        pendingGrantExpiry = 0L
                         showMessage(suNotAllowed)
                         return@launch
                     }
-                    if (!updatedProfile.rootUseDefault
+                    if (!pendingConfirmed && updatedProfile != profile) {
+                        pendingGrantRequest = request
+                        pendingGrantExpiry = now + 15_000L
+                        showMessage(confirmGrantRootAgain)
+                        return@launch
+                    }
+                    pendingGrantRequest = null
+                    pendingGrantExpiry = 0L
+                } else {
+                    pendingGrantRequest = null
+                    pendingGrantExpiry = 0L
+                }
+                if (!Natives.setAppProfile(updatedProfile)) {
+                    pendingGrantRequest = null
+                    pendingGrantExpiry = 0L
+                    showMessage(failToUpdateAppProfile)
+                } else {
+                    pendingGrantRequest = null
+                    pendingGrantExpiry = 0L
+                    if (updatedProfile.allowSu
+                        && !updatedProfile.rootUseDefault
                         && updatedProfile.rules.isNotEmpty()
-                        && !setSepolicy(profile.name, updatedProfile.rules)
+                        && !setSepolicy(updatedProfile.name, updatedProfile.rules)
                     ) {
+                        val profileRollbackSuccess = Natives.setAppProfile(profile)
+                        val sepolicyRollbackSuccess = if (profile.allowSu && !profile.rootUseDefault) {
+                            setSepolicy(profile.name, profile.rules)
+                        } else {
+                            setSepolicy(updatedProfile.name, "")
+                        }
+                        if (!profileRollbackSuccess || !sepolicyRollbackSuccess) {
+                            showMessage(failToUpdateAppProfile)
+                            return@launch
+                        }
                         showMessage(failToUpdateSepolicy)
                         return@launch
                     }
-                }
-                if (!Natives.setAppProfile(updatedProfile)) {
-                    showMessage(failToUpdateAppProfile)
-                } else {
                     profile = updatedProfile
                     if (uiMode == UiMode.Material) {
                         viewModel.loadAppList()
