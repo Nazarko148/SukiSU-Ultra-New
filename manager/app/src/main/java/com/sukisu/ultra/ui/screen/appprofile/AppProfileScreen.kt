@@ -75,8 +75,29 @@ fun AppProfileScreen(uid: Int) {
     val failToUpdateSepolicy = stringResource(R.string.failed_to_update_sepolicy).format(primaryAppInfo.label)
     val suNotAllowed = stringResource(R.string.su_not_allowed).format(primaryAppInfo.label)
     val confirmGrantRootAgain = stringResource(R.string.confirm_grant_root_again).format(primaryAppInfo.label)
+    var pendingGrantKey by rememberSaveable(uid, packageName) {
+        mutableStateOf<String?>(null)
+    }
     var pendingGrantExpiry by rememberSaveable(uid, packageName) {
         mutableStateOf(0L)
+    }
+
+    fun grantConfirmationKey(profile: Natives.Profile): String {
+        return listOf(
+            profile.name,
+            profile.currentUid.toString(),
+            profile.rootUseDefault.toString(),
+            profile.rootTemplate.orEmpty(),
+            profile.uid.toString(),
+            profile.gid.toString(),
+            profile.groups.joinToString(","),
+            profile.capabilities.joinToString(","),
+            profile.context,
+            profile.namespace.toString(),
+            profile.nonRootUseDefault.toString(),
+            profile.umountModules.toString(),
+            profile.rules
+        ).joinToString("|")
     }
 
     fun showMessage(message: String) {
@@ -114,14 +135,17 @@ fun AppProfileScreen(uid: Int) {
             scope.launch {
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
+                        pendingGrantKey = null
                         pendingGrantExpiry = 0L
                         showMessage(suNotAllowed)
                         return@launch
                     }
                     if (!profile.allowSu) {
                         val now = SystemClock.elapsedRealtime()
-                        val isConfirmed = now <= pendingGrantExpiry
+                        val requestKey = grantConfirmationKey(updatedProfile)
+                        val isConfirmed = now <= pendingGrantExpiry && pendingGrantKey == requestKey
                         if (!isConfirmed) {
+                            pendingGrantKey = requestKey
                             pendingGrantExpiry = now + 15_000L
                             showMessage(confirmGrantRootAgain)
                             return@launch
@@ -131,17 +155,21 @@ fun AppProfileScreen(uid: Int) {
                         && updatedProfile.rules.isNotEmpty()
                         && !setSepolicy(profile.name, updatedProfile.rules)
                     ) {
+                        pendingGrantKey = null
                         pendingGrantExpiry = 0L
                         showMessage(failToUpdateSepolicy)
                         return@launch
                     }
                 } else {
+                    pendingGrantKey = null
                     pendingGrantExpiry = 0L
                 }
                 if (!Natives.setAppProfile(updatedProfile)) {
+                    pendingGrantKey = null
                     pendingGrantExpiry = 0L
                     showMessage(failToUpdateAppProfile)
                 } else {
+                    pendingGrantKey = null
                     pendingGrantExpiry = 0L
                     profile = updatedProfile
                     if (uiMode == UiMode.Material) {
