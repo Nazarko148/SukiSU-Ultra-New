@@ -195,9 +195,15 @@ fun AppProfileScreen(uid: Int) {
                         && updatedProfile.rules.isNotEmpty()
                         && !setSepolicy(updatedProfile.name, updatedProfile.rules)
                     ) {
-                        Natives.setAppProfile(profile)
-                        if (profile.allowSu && !profile.rootUseDefault) {
+                        val profileRollbackSuccess = Natives.setAppProfile(profile)
+                        val sepolicyRollbackSuccess = if (profile.allowSu && !profile.rootUseDefault) {
                             setSepolicy(profile.name, profile.rules)
+                        } else {
+                            setSepolicy(updatedProfile.name, "")
+                        }
+                        if (!profileRollbackSuccess || !sepolicyRollbackSuccess) {
+                            showMessage(failToUpdateAppProfile)
+                            return@launch
                         }
                         showMessage(failToUpdateSepolicy)
                         return@launch
