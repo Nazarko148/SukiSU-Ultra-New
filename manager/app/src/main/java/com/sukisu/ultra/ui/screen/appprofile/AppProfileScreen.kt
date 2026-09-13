@@ -171,7 +171,7 @@ fun AppProfileScreen(uid: Int) {
                         showMessage(suNotAllowed)
                         return@launch
                     }
-                    if (!pendingConfirmed && !profile.allowSu) {
+                    if (!pendingConfirmed && updatedProfile != profile) {
                         pendingGrantRequest = request
                         pendingGrantExpiry = now + 15_000L
                         showMessage(confirmGrantRootAgain)
