@@ -1,5 +1,6 @@
 package com.sukisu.ultra.ui.screen.appprofile
 
+import android.os.SystemClock
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -73,6 +74,13 @@ fun AppProfileScreen(uid: Int) {
     val failToUpdateAppProfile = stringResource(R.string.failed_to_update_app_profile).format(primaryAppInfo.label)
     val failToUpdateSepolicy = stringResource(R.string.failed_to_update_sepolicy).format(primaryAppInfo.label)
     val suNotAllowed = stringResource(R.string.su_not_allowed).format(primaryAppInfo.label)
+    val confirmGrantRootAgain = stringResource(R.string.confirm_grant_root_again).format(primaryAppInfo.label)
+    var pendingGrantProfile by rememberSaveable(uid, packageName) {
+        mutableStateOf<Natives.Profile?>(null)
+    }
+    var pendingGrantExpiry by rememberSaveable(uid, packageName) {
+        mutableStateOf(0L)
+    }
 
     fun showMessage(message: String) {
         scope.launch {
@@ -109,20 +117,41 @@ fun AppProfileScreen(uid: Int) {
             scope.launch {
                 if (updatedProfile.allowSu) {
                     if (uid < 2000 && uid != 1000) {
+                        pendingGrantProfile = null
+                        pendingGrantExpiry = 0L
                         showMessage(suNotAllowed)
                         return@launch
+                    }
+                    if (!profile.allowSu) {
+                        val now = SystemClock.elapsedRealtime()
+                        val isConfirmed = pendingGrantProfile == updatedProfile && now <= pendingGrantExpiry
+                        if (!isConfirmed) {
+                            pendingGrantProfile = updatedProfile
+                            pendingGrantExpiry = now + 15_000L
+                            showMessage(confirmGrantRootAgain)
+                            return@launch
+                        }
                     }
                     if (!updatedProfile.rootUseDefault
                         && updatedProfile.rules.isNotEmpty()
                         && !setSepolicy(profile.name, updatedProfile.rules)
                     ) {
+                        pendingGrantProfile = null
+                        pendingGrantExpiry = 0L
                         showMessage(failToUpdateSepolicy)
                         return@launch
                     }
+                } else {
+                    pendingGrantProfile = null
+                    pendingGrantExpiry = 0L
                 }
                 if (!Natives.setAppProfile(updatedProfile)) {
+                    pendingGrantProfile = null
+                    pendingGrantExpiry = 0L
                     showMessage(failToUpdateAppProfile)
                 } else {
+                    pendingGrantProfile = null
+                    pendingGrantExpiry = 0L
                     profile = updatedProfile
                     if (uiMode == UiMode.Material) {
                         viewModel.loadAppList()
